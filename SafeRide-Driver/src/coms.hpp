@@ -6,8 +6,10 @@
 
 // ── Must match motor's MotorData exactly ──────────────────────────────────
 enum MotorCommand : uint8_t { CMD_START_TEST = 1 };
-struct MotorData  { MotorCommand command; };
-struct BacData    { float bac; };
+struct MotorData      { MotorCommand command; };
+
+// ── Sent to motor after test completes (replaces BacData) ────────────────
+struct TestResultData { bool isSober; };  // 1 byte — won't collide with DriverData
 
 volatile bool testRequested = false;
 
@@ -28,10 +30,11 @@ inline void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
     }
 }
 
-inline void sendBacToMotor(float bac) {
-    BacData data;
-    data.bac = bac;
+inline void sendTestResultToMotor(bool isSober) {
+    TestResultData data;
+    data.isSober = isSober;
     esp_err_t result = esp_now_send(receiverMacAddress, (uint8_t *)&data, sizeof(data));
-    Serial.printf("[ESP-NOW] BAC %.4f sent to motor — %s\n", bac,
+    Serial.printf("[ESP-NOW] TestResult (%s) sent to motor — %s\n",
+                  isSober ? "SOBER" : "DRUNK",
                   result == ESP_OK ? "OK" : "FAILED");
 }

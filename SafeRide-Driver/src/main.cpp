@@ -24,14 +24,13 @@ static void sendDriverData() {
 }
 
 // ─── Alcohol test ─────────────────────────────────────────────────────────
-// Blocking: 15s warmup + 5s sampling. Called from setup() on boot,
-// and from loop() whenever testRequested is set by the motor.
-float runAlcoholTest() {
+// Blocking: 15s warmup + 5s sampling.
+// Only runs when testRequested is set by the motor (app triggered).
+void runAlcoholTest() {
     Serial.println("=========================================");
     Serial.println("MICS-5524 heater ON — warming up...");
     digitalWrite(MICS_EN, HIGH);
 
-    // 15s warmup — log every 5s so Serial stays alive
     unsigned long start = millis();
     while (millis() - start < WARMUP_MS) {
         Serial.printf("  Warm-up: %lus remaining...\n",
@@ -58,30 +57,27 @@ float runAlcoholTest() {
     Serial.printf("Test complete. Avg BAC: %.4f g/dL -> %s\n",
                   avgBac, driverData.isSober ? "SOBER" : "NOT SOBER");
 
-    // Send updated sobriety state to motor immediately
+    // Send sobriety state for ignition control
     sendDriverData();
 
-    // Also send raw BAC so motor can forward it to the app
-    sendBacToMotor(avgBac);
+    // Send dedicated test result so motor can notify the app
+    sendTestResultToMotor(driverData.isSober);
 
-    // Heater off to save battery
     digitalWrite(MICS_EN, LOW);
     Serial.println("MICS-5524 heater OFF.");
     Serial.println("=========================================");
-
-    return avgBac;
 }
 
 void setup() {
     Serial.begin(115200);
 
     WiFi.mode(WIFI_STA);
+
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
         return;
     }
 
-    // ── Register motor as peer (send target) ──────────────────────────────
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, receiverMacAddress, 6);
     peerInfo.channel = 0;
@@ -92,14 +88,14 @@ void setup() {
     }
 
     esp_now_register_send_cb(OnDataSent);
-    esp_now_register_recv_cb(OnDataRecv);  // ← receive START_TEST from motor
+    esp_now_register_recv_cb(OnDataRecv);
 
     driverData.helmetType = HelmetTypes::Driver;
     driverData.helmetOn   = false;
-    driverData.isSober    = false;
+    driverData.isSober    = false;  // ignition stays locked until app runs a test
 
     pinMode(MICS_EN, OUTPUT);
-    digitalWrite(MICS_EN, LOW);  // heater off until test starts
+    digitalWrite(MICS_EN, LOW);
 
     Wire.begin(21, 22);
     if (!ads.begin()) {
@@ -108,17 +104,15 @@ void setup() {
     }
     ads.setGain(GAIN_ONE);
 
-    // Initial helmet state
     int16_t fsrRaw = ads.readADC_SingleEnded(1);
     float   volts  = ads.computeVolts(fsrRaw);
     isHelmetWorn        = (volts > WEAR_THRESHOLD);
     driverData.helmetOn = isHelmetWorn;
     helmetOffSince      = isHelmetWorn ? 0 : millis();
 
-    // Run boot-time alcohol test
-    runAlcoholTest();
-
-    Serial.println("Initial state sent to motor.");
+    // Tell motor we're online (isSober=false keeps ignition locked until test)
+    sendDriverData();
+    Serial.println("Driver helmet ready. Waiting for app to trigger test.");
 }
 
 void loop() {

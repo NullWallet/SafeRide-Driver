@@ -30,7 +30,7 @@ Adafruit_ADS1115 ads;
 
 // BAC threshold for sobriety (g/dL). PH professional-driver limit is 0.0,
 // general 0.05 — keep 0.05 here unless you want a stricter test.
-const float BAC_THRESHOLD = 0.05f;
+const float BAC_THRESHOLD = 0.03f;
 
 // --- MICS-5524 hardware constants ---
 const float V_CC          = 5.0;

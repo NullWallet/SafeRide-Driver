@@ -5,8 +5,6 @@
 
 #define MICS_EN 18   // EN pin on MICS-5524 breakout (was MQ3_SWITCH)
 
-typedef unsigned char uint8_t;
-
 const uint8_t receiverMacAddress[] = {0x14, 0x33, 0x5C, 0x04, 0x20, 0x70};
 
 enum HelmetTypes
@@ -19,13 +17,17 @@ struct DriverData
 {
     HelmetTypes helmetType;
     bool helmetOn;
-    float bacLevel;
+    bool isSober;
 };
 
 #include <Wire.h>
 #include <Adafruit_ADS1X15.h>
 
 Adafruit_ADS1115 ads;
+
+// BAC threshold for sobriety (g/dL). 0.05 is the stricter legal limit
+// used in the Philippines for professional drivers — adjust if needed.
+const float BAC_THRESHOLD = 0.05f;
 
 // --- Sensor Constants (MICS-5524 on Adafruit breakout #3199) ---
 const float V_CC          = 5.0;     // Breakout VCC
@@ -78,3 +80,4 @@ void testSensor() {
     Serial.println(bac > 0.05 ? ">> WARNING: Above legal limit! <<" : "Within legal limit.");
     Serial.println();
 }
+

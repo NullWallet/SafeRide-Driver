@@ -1,56 +1,72 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include "variables.hpp"
 #include "comms.hpp"
 
-#define FSR_PIN 3
+HelmetData    helmetData;
+bool          isHelmetWorn = false;
+unsigned long lastSendMs   = 0;
 
-const int PRESSURE_THRESHOLD = 1000;
-
-PassengerData passengerData;
-
-void setup()
-{
-  Serial.begin(115200);
-
-  WiFi.mode(WIFI_STA);
-  if (esp_now_init() != ESP_OK)
-  {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
-
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, receiverMacAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-
-  if (esp_now_add_peer(&peerInfo) != ESP_OK)
-  {
-    Serial.println("Failed to add peer");
-    return;
-  }
-
-  passengerData.helmetType = Passenger;
-  esp_now_register_send_cb(OnDataSent);
+static void sendHelmetData() {
+    esp_err_t res = esp_now_send(receiverMacAddress,
+                                 (uint8_t *)&helmetData,
+                                 sizeof(helmetData));
+    lastSendMs = millis();
+    if (res != ESP_OK) Serial.printf("esp_now_send error: %d\n", res);
 }
 
-void loop()
-{
-  // Read the raw analog voltage value (0 to 4095)
-  int rawValue = analogRead(FSR_PIN);
+void setup() {
+    Serial.begin(115200);
 
-  // Determine if the helmet is actually being worn
-  if (rawValue > PRESSURE_THRESHOLD && passengerData.helmetOn == false)
-  {
-    passengerData.helmetOn = true;
-    esp_now_send(receiverMacAddress, (uint8_t *)&passengerData, sizeof(PassengerData));
-  }
-  else if (rawValue <= PRESSURE_THRESHOLD && passengerData.helmetOn == true)
-  {
-    passengerData.helmetOn = false;
-    esp_now_send(receiverMacAddress, (uint8_t *)&passengerData, sizeof(PassengerData));
-  }
+    WiFi.mode(WIFI_STA);
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
 
-  delay(200); // Small delay to avoid flooding the serial monitor
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, receiverMacAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Failed to add peer");
+        return;
+    }
+    esp_now_register_send_cb(OnDataSent);
+
+    helmetData.helmetType = HelmetTypes::Passenger;
+    helmetData.helmetOn   = false;
+    helmetData.isSober    = false;   // unused for passenger
+
+    pinMode(FSR_PIN, INPUT);
+
+    int raw = analogRead(FSR_PIN);
+    isHelmetWorn        = (raw > WEAR_THRESHOLD);
+    helmetData.helmetOn = isHelmetWorn;
+    Serial.printf("Initial FSR raw: %d -> helmet %s\n",
+                  raw, isHelmetWorn ? "ON" : "OFF");
+
+    sendHelmetData();
+    Serial.println("Passenger helmet ready.");
+}
+
+void loop() {
+    int  raw = analogRead(FSR_PIN);
+    bool nowWorn = isHelmetWorn
+        ? raw > (WEAR_THRESHOLD - HYSTERESIS)
+        : raw > (WEAR_THRESHOLD + HYSTERESIS);
+
+    if (nowWorn != isHelmetWorn) {
+        isHelmetWorn        = nowWorn;
+        helmetData.helmetOn = nowWorn;
+        Serial.printf("STATUS: Helmet %s (raw=%d)\n",
+                      nowWorn ? "RE-WORN" : "REMOVED", raw);
+        sendHelmetData();
+    }
+    else if (millis() - lastSendMs >= HEARTBEAT_MS) {
+        sendHelmetData();
+    }
+
+    delay(100);
 }
